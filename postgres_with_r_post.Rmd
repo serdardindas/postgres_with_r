@@ -1,0 +1,159 @@
+---
+title: "Postgres With R"
+description: |
+  How to connect and make R/SQL operations in Postgres database with R
+  - name: Serdar Dindas 
+    url: https://serdardindas.netlify.app/
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Intro text for Postgres and using R with it.
+
+### 1)Libraries
+
+```{r}
+library(DBI)        # A database interface for communication between R and relational database management systems 
+library(RPostgres)  # Interface for 'PostgreSQL
+library(dplyr)      # For data manipulation [Best Tool Ever :)]
+#library(magrittr)
+```
+
+### 2)Connect Postgres Database from R
+
+I already create database in my local Postgres named **VideoGames**. This database has no data tables in it.
+
+Firstly we need to introduce our database to R. To create connection, we define **con** variable.
+
+```{r}
+con <- dbConnect(
+  RPostgres::Postgres(), # Call Postgres interface 
+  host = "localhost",    # Host is where your database hosted. In this example I use my local database
+  port = 5432,           # Your database connection port, It defult 5432 for Postgres
+  dbname = "VideoGames", # Your database name
+  user = "postgres",     # Your Postgres database username
+  password = "sanjeon"   # Your Postgres database password
+)
+```
+
+\
+
+To check database connection has been established **dbIsValid(con)** can be used. Most of the time we're going to use **con** argument with database functions.
+
+```{r}
+dbIsValid(con)
+```
+
+Now you see [TRUE] that shows we connect VideoGames database with R.
+
+\
+
+**dbListTables()** list all tables that database have.
+
+```{r}
+dbListTables(con)
+```
+
+\
+
+### 3)Import Table Into Postgresql
+
+Let's import our table into VideoGames database. I will use video_games_data as I mentioned before.
+
+```{r}
+video_games_data <- readxl::read_excel("video_games_data.xlsx", 
+                                       col_types = c("numeric", "text", "text", "text", "numeric"))
+
+video_games_price <- readxl::read_excel("video_games_price.xlsx", 
+                                       col_types = c("numeric", "text", "numeric"))
+
+dbWriteTable(con, "videogames_data", video_games_data, overwrite=TRUE)
+dbWriteTable(con, "videogames_price", video_games_price, overwrite=TRUE)
+
+```
+
+With **dbWriteTable()** function we add our table. As you see in the function there is *overwrite* argument in it. *Overwrite=TRUE* helps you overwrite your table if already exist.
+
+\
+
+```{r}
+dbListTables(con)
+```
+
+Now **dbListTables(con)** returns with value : [1] "videogames_data" "videogames_price"
+
+Tables's fields -\>\
+**videogames_data:** *number(ID)*, *game*, *release_date*, *developer*, *metascore*\
+**videogames_price:** *number(ID)*, *game*, *price*\
+
+###  4)Call Tables From Database 
+
+\
+**i) With Dplyr's tbl() function**\
+**tbl()** function can be used for database operations. With **tbl()** you can bring your database table to your local R enviroment as a List. If you need your database table as data frame you need to add **collect()** end of pipeline.
+
+```{r}
+videogames_data <-tbl(con,"videogames_data") %>% collect()
+```
+
+\
+
+**ii) With DBI's dbSendQuery() function** \
+**dbSendQuery()** function lets you use SQL queries inside in it. You could take data as you need at the beginning by from database with queries. You have to add extra step convert your query to data frame output with **dbFetch()** like *collect()* in *dplyr*.
+
+```{r}
+videogames_price <- dbSendQuery(con, "SELECT * FROM videogames_price") %>% dbFetch()
+```
+
+###  5)Manipulate Data
+
+\
+**i) With Dplyr tbl() function**\
+**tbl()** let user dplyr's manipulation functions such as: *filter*, *select*, *arrange*, *mutate* etc. after in a pipeline. You should not forget **collect** at the end of the pipeline to get your data as data frame.
+
+```{r}
+Higher_Than_80 <- tbl(con, "videogames_data") %>% 
+                            filter(metascore>=80) %>% 
+                            group_by(developer) %>%
+                            summarise(Games_Count_Higher_Than_80=n()) %>% 
+                            arrange(desc(Games_Count_Higher_Than_80)) #%>% 
+                            #collect()
+Higher_Than_80
+```
+
+This is the thing you might see ***Source lazy query [?? x 2]*** I will not give detail about it. But if you want to get any idea about I suggest you to take a look [Vebash Naidoo's Post](https://sciencificity-blog.netlify.app/posts/2020-12-12-using-the-tidyverse-with-databases/#whats-with-this-lazy-query-were-seeing){target="\"_blank"} that gives me starting point.
+
+\
+Dplyr also has **show_query()** function, helps you convert your dplyr pipelines into SQL queries. This is amazing tool for R users who is SQL-beginner.
+
+```{r}
+tbl(con, "videogames_data") %>% 
+          filter(metascore>=80) %>% 
+          group_by(developer) %>%
+          summarise(Games_Count_Higher_Than_80=n()) %>% 
+          arrange(desc(Games_Count_Higher_Than_80)) %>%
+          show_query()
+```
+
+
+\
+**ii) With DBI dbSendQuery() function**\
+As I mentioned before **dbSendQuery()** execute SQL queries. We use  *show_query* output inside it.
+
+```{r}
+dbFetch(
+dbSendQuery(con, 
+                 'SELECT "developer", COUNT(*) AS "Games_Count_Higher_Than_80"
+ FROM "videogames_data"
+ WHERE ("metascore" >= 80.0)
+ GROUP BY "developer"
+ ORDER BY "Games_Count_Higher_Than_80" DESC' )
+)
+
+```
+
+
